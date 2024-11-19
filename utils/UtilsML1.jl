@@ -815,3 +815,126 @@ function modelCrossValidation(modelType::Symbol,
 
     return metrics[1]
 end
+
+function genModel(estimator:: Symbol, modelsHyperParameters:: Dict{String})
+    model = nothing
+
+    if estimator == :SVM
+        model = SVC(kernel=modelsHyperParameters["kernel"],
+        degree = modelsHyperParameters["degree"],
+        gamma = modelsHyperParameters["gamma"],
+        C = modelsHyperParameters["C"])
+
+    elseif estimator == :DecisionTree
+        model = DecisionTreeClassifier(max_depth = modelsHyperParameters["max_depth"],
+        random_state = modelsHyperParameters["random_state"])
+
+    elseif estimator == :KNN
+        model = KNeighborsClassifier(n_neighbors = modelsHyperParameters["k"])
+        
+    elseif estimator == :ANN
+        if haskey(modelsHyperParameters, "validation_fraction") && modelsHyperParameters["validation_fraction"] > 0
+            # Ponemos early stopping a true porque es obligatorio cuando hay validation fraction
+            model = MLPClassifier(hidden_layer_sizes = modelsHyperParameters["topology"],
+            max_iter = modelsHyperParameters["maxEpochs"],
+            learning_rate_init = modelsHyperParameters["learningRate"],
+            validation_fraction = modelsHyperParameters["validation_fraction"],
+            early_stopping = true)
+        else
+            model = MLPClassifier(hidden_layer_sizes = modelsHyperParameters["topology"],
+            max_iter = modelsHyperParameters["maxEpochs"],
+            learning_rate_init = modelsHyperParameters["learningRate"])
+        end
+    end
+    return model
+end
+
+
+function trainClassEnsemble(estimators::AbstractArray{Symbol,1},
+    modelsHyperParameters::AbstractArray{Dict{String, <:Any},1},
+    trainingDataset::Tuple{AbstractArray{<:Real,2},AbstractArray{Bool,2}},
+    kFoldIndices::Array{Int64,1})
+
+    @assert length(estimators) == length(modelsHyperParameters)
+
+    (inputs, targets) = trainingDataset
+
+    # Punto 1: almacenar cada métrica en cada fold
+    # Hacer un array de arrays para las metricas???
+    accuracies = Float64[]
+    error_rates = Float64[]
+    sensitivities = Float64[]
+    specificities = Float64[]
+    ppvs = Float64[]
+    npvs = Float64[]
+    f_scores = Float64[]
+
+    # Punto 2
+    for numFold in 1:length(unique(kFoldIndices))
+        # Preparar y dividir los datos con los índices de CV (4 matrices)
+        trainingInputs = inputs[kFoldIndices.!=numFold, :]
+        testInputs = inputs[kFoldIndices.==numFold, :]
+        trainingTargets = targets[kFoldIndices.!=numFold, :]
+        testTargets = targets[kFoldIndices.==numFold, :]
+
+        # Reshape trainingTargets to ensure it’s 1D and not have warnings
+        trainingTargets = reshape(trainingTargets, :)
+
+        # Punto 3: Crear los modelos
+        numModels = length(estimators)
+        models = Array{Any}(undef, numModels)
+        modelName = Dict(
+            :ANN => "ANN",
+            :SVM => "SVM",
+            :DecisionTree => "DT",
+            :KNN => "KNN",
+        )
+        for (index, estimator) in enumerate(estimators)
+            model = genModel(estimator, modelsHyperParameters[index])
+
+            # Punto 4: Entrenar el modelo
+            fit!(model, trainingInputs, trainingTargets)
+
+            models[index] = (estimator, deepcopy(model))
+        end
+
+        # Punto 6: Construir el modelo de ensamblaje (stacking)
+        ensemble_model = StackingClassifier(
+            estimators=[(string(modelName[name], "_", i), model) for (i, (name, model)) in enumerate(models)],
+            final_estimator=SVC(probability=true),
+            n_jobs=-1
+        )
+
+        # Entrenar el modelo de esamblaje
+        fit!(ensemble_model, trainingInputs, trainingTargets)
+
+        # Realizar predicciones en el conjunto de prueba
+
+        predictions = ensemble_model.predict(testInputs)
+
+        accuracy, error_rate, sensitivity, specificity, ppv, npv, f_score, cm = confusionMatrix1(predictions, vec(testTargets))
+
+        # Almacenar cada métrica en los vectores correspondientes
+        push!(accuracies, accuracy)
+        push!(error_rates, error_rate)
+        push!(sensitivities, sensitivity)
+        push!(specificities, specificity)
+        push!(ppvs, ppv)
+        push!(npvs, npv)
+        push!(f_scores, f_score)
+    end
+
+    # Calcular las medias y desviaciones estándar de las métricas
+    mean_metrics = Dict(
+        "mean_accuracy" => mean(accuracies), "std_accuracy" => std(accuracies),
+        "mean_error_rate" => mean(error_rates), "std_error_rate" => std(error_rates),
+        "mean_sensitivity" => mean(sensitivities), "std_sensitivity" => std(sensitivities),
+        "mean_specificity" => mean(specificities), "std_specificity" => std(specificities),
+        "mean_ppv" => mean(ppvs), "std_ppv" => std(ppvs),
+        "mean_npv" => mean(npvs), "std_npv" => std(npvs),
+        "mean_f_score" => mean(f_scores), "std_f_score" => std(f_scores)
+    )
+
+    return mean_metrics
+
+end
