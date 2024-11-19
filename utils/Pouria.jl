@@ -605,3 +605,92 @@ function trainClassANN(topology::AbstractArray{<:Int,1},
                         learningRate=learningRate, repetitionsTraining=repetitionsTraining,
                         validationRatio=validationRatio, maxEpochsVal=maxEpochsVal)
 end
+
+using Pkg;
+using UrlDownload
+using DataFrames
+using CSV
+
+using ScikitLearn
+
+function trainClassEnsemble(estimators::AbstractArray{Symbol,1}, 
+    modelsHyperParameters::AbstractArray{Dict{String}, 1}, 
+    trainingDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}},    
+    kFoldIndices::Array{Int64,1})
+
+    (inputs, targets) = trainingDataset
+    k = maximum(kFoldIndices)
+
+    @assert length(estimators) == length(modelsHyperParameters)
+
+    # Arrays for folds results
+    all_metrics_acc = Float32[]
+    all_metrics_F1 = Float32[]
+
+    for fold in 1:k
+        # Split train/test based on fold index
+        train_inputs = inputs[kFoldIndices .!= fold, :]
+        test_inputs = inputs[kFoldIndices .== fold, :]
+        train_targets = targets[kFoldIndices .!= fold, :]
+        test_targets = targets[kFoldIndices .== fold, :]
+
+        # Initialize predictions matrix
+        num_labels = size(train_targets, 2)
+        fold_predictions = []
+
+        for label in 1:num_labels
+            # Create models for each estimator with its parameters
+            models = [create_sklearn_model(estimator, modelsHyperParameters[i]) for (i, estimator) in enumerate(estimators)]
+            voting_clf = VotingClassifier(estimators=[(string(est), model) for (est, model) in zip(estimators, models)], n_jobs=1)
+            
+            # Fit on the single label column
+            fit!(voting_clf, train_inputs, train_targets[:, label])
+            
+            # Predict for this label
+            label_predictions = ScikitLearn.predict(voting_clf, test_inputs)
+            push!(fold_predictions, label_predictions)
+        end
+
+        # Combine label predictions into a matrix for this fold
+        fold_predictions_matrix = hcat(fold_predictions...)  # Convert list to matrix
+
+        # Calculate metrics
+        metrics = confusionMatrix(fold_predictions_matrix, test_targets)
+        push!(all_metrics_acc, metrics[:Accuracy])
+        push!(all_metrics_F1, metrics[:F1])
+    end
+
+    # Return average metrics across folds
+    return mean(all_metrics_acc), std(all_metrics_acc), mean(all_metrics_F1), std(all_metrics_F1)
+end
+
+
+function create_sklearn_model(modelType::Symbol, params::Dict)
+    if modelType == :SVC
+        return SVC(kernel=params["kernel"], C=params["C"], degree=params["kernelDegree"], 
+        gamma=params["kernelGamma"])
+    elseif modelType == :DecisionTree
+        return DecisionTreeClassifier(max_depth=params["max_depth"])
+    elseif modelType == :kNN
+        return KNeighborsClassifier(params["k"])
+    elseif modelType == :ANN
+        return MLPClassifier(hidden_layer_sizes = params["topology"], max_iter = params["maxEpochs"], learning_rate_init = params["learningRate"],
+        validation_fraction = params["validationRatio"], n_iter_no_change = params["maxEpochsVal"])
+    else
+        error("Unsupported model type")
+    end
+end
+
+function trainClassEnsemble(baseEstimator::Symbol, 
+    modelsHyperParameters::Dict,
+    trainingDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}},     
+    kFoldIndices::     Array{Int64,1},
+    NumEstimators::Int=100) #NumEstimators changed to the end because "positional parameters must occur at the end"
+
+    estimators = collect(1:NumEstimators)
+    for repetition in 1:NumEstimators
+        estimators[repetition] = baseEstimator
+    end
+
+    return trainClassEnsemble(estimators=estimators, modelsHyperParameters=modelsHyperParameters, trainingDataset=trainingDataset,kFoldIndices=kFoldIndices)
+end
