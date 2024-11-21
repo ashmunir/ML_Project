@@ -105,3 +105,7 @@ function oneHotEncoding(feature::AbstractArray{<:Any,1}, classes::AbstractArray{
     end
     return oneHot
 end
+
+oneHotEncoding(feature::AbstractArray{<:Any, 1}) = oneHotEncoding(feature, unique(feature));
+
+oneHotEncoding(feature::AbstractArray{Bool, 1}) = reshape(feature, :, 1);
