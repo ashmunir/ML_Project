@@ -65,6 +65,13 @@ function normalizeZeroMean!(dataset::AbstractArray{<:Real, 2},
 	return dataset
 end
 
+function crossvalidation(N::Int64, k::Int64)
+	sorted_vector = collect(1:k)
+    repeated_vector = repeat(sorted_vector, Int(ceil(N / k)))
+    repeated_vector = repeated_vector[1:N]
+    return shuffle!(repeated_vector)
+end
+
 function crossvalidation(targets::AbstractArray{Bool, 2}, k::Int64)
 	@assert size(targets, 2) < 2 "Targets must be a 2D array with more than one column."
 	N = size(targets, 1)
