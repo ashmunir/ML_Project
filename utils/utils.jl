@@ -54,6 +54,34 @@ function calculateZeroMeanNormalizationParameters(dataset::AbstractArray{<:Real,
     return mean(dataset, dims=1), std(dataset, dims=1)
 end
 
+function calculateMinMaxNormalizationParameters(dataset::AbstractArray{<:Real, 2})
+	return minimum(dataset, dims = 1), maximum(dataset, dims = 1)
+end;
+
+function normalizeMinMax!(dataset::AbstractArray{<:Real, 2},
+	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
+	minValues = normalizationParameters[1]
+	maxValues = normalizationParameters[2]
+	dataset .-= minValues
+	dataset ./= (maxValues .- minValues)
+	# eliminate any atribute that do not add information
+	dataset[:, vec(minValues .== maxValues)] .= 0
+	return dataset
+end;
+
+function normalizeMinMax!(dataset::AbstractArray{<:Real, 2})
+	normalizeMinMax!(dataset, calculateMinMaxNormalizationParameters(dataset))
+end;
+
+function normalizeMinMax(dataset::AbstractArray{<:Real, 2},
+	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
+	normalizeMinMax!(copy(dataset), normalizationParameters)
+end;
+
+function normalizeMinMax(dataset::AbstractArray{<:Real, 2})
+	normalizeMinMax!(copy(dataset), calculateMinMaxNormalizationParameters(dataset))
+end;
+
 function normalizeZeroMean!(dataset::AbstractArray{<:Real, 2},
 	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
 	avgValues = normalizationParameters[1]
@@ -64,6 +92,15 @@ function normalizeZeroMean!(dataset::AbstractArray{<:Real, 2},
 	dataset[:, vec(stdValues .== 0)] .= 0
 	return dataset
 end
+
+function normalizeZeroMean(dataset::AbstractArray{<:Real, 2},
+	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
+	normalizeZeroMean!(copy(dataset), normalizationParameters)
+end;
+
+function normalizeZeroMean(dataset::AbstractArray{<:Real, 2})
+	normalizeZeroMean!(copy(dataset), calculateZeroMeanNormalizationParameters(dataset))
+end;
 
 function crossvalidation(N::Int64, k::Int64)
 	sorted_vector = collect(1:k)
