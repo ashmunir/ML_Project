@@ -604,27 +604,27 @@ end;
 # Cross validation
 function crossvalidation(N::Int64, k::Int64)
 	sorted_vector = collect(1:k)
-    repeated_vector = repeat(sorted_vector, Int(ceil(N / k)))
-    repeated_vector = repeated_vector[1:N]
-    return shuffle!(repeated_vector)
+	repeated_vector = repeat(sorted_vector, Int(ceil(N / k)))
+	repeated_vector = repeated_vector[1:N]
+	return shuffle!(repeated_vector)
 end
 
 function crossvalidation(targets::AbstractArray{Bool, 2}, k::Int64)
 	@assert size(targets, 2) < 2 "Targets must be a 2D array with more than one column."
 	N = size(targets, 1)
 	indexes = zeros(Int, N)
-    
-    for class in 1:size(targets, 2)
-        # Number of instances for the current class
-        class_indexes = findall(targets[:, class])
-		class_count = length(class_indexes,)
-        # Generate cross-validation indexes for the current class
-        stratified_indexes = crossvalidation(class_count, k)
-        
-        # Assign stratified_indexes to the corresponding positions in indexes
-        indexes[class_indexes] .= stratified_indexes
-    end
-    return indexes
+
+	for class in 1:size(targets, 2)
+		# Number of instances for the current class
+		class_indexes = findall(targets[:, class])
+		class_count = length(class_indexes)
+		# Generate cross-validation indexes for the current class
+		stratified_indexes = crossvalidation(class_count, k)
+
+		# Assign stratified_indexes to the corresponding positions in indexes
+		indexes[class_indexes] .= stratified_indexes
+	end
+	return indexes
 end
 
 function crossvalidation(targets::AbstractArray{<:Any, 1}, k::Int64)
@@ -791,3 +791,202 @@ function trainClassANN(topology::AbstractArray{<:Int, 1},
 		repetitionsTraining = repetitionsTraining, validationRatio = validationRatio,
 		maxEpochsVal = maxEpochsVal)
 end;
+
+function generateModel(estimator::Symbol, modelHyperParameters::Dict{String})
+	model = nothing
+	# 5. In case a validation set is needed, e.g. wi, split the training set into two parts. To do this, use the holdOut function. 
+	if estimator == :ANN
+		if haskey(modelHyperParameters, "validation_fraction") && (modelHyperParameters["validation_fraction"] > 0.0)
+			model = MLPClassifier(hidden_layer_sizes = modelHyperParameters["topology"],
+				max_iter = modelHyperParameters["maxEpochs"],
+				learning_rate_init = modelHyperParameters["learningRate"],
+				validation_fraction = modelHyperParameters["validation_fraction"],
+				early_stopping = true)
+		else
+			model = MLPClassifier(hidden_layer_sizes = modelHyperParameters["topology"],
+				max_iter = modelHyperParameters["maxEpochs"],
+				learning_rate_init = modelHyperParameters["learningRate"])
+		end
+	elseif estimator == :SVM
+		model = SVC(kernel = modelHyperParameters["kernel"],
+			C = modelHyperParameters["C"], gamma = modelHyperParameters["gamma"])
+	elseif estimator == :DecisionTree
+		model = DecisionTreeClassifier(max_depth = modelHyperParameters["max_depth"],
+			random_state = modelHyperParameters["random_state"])
+	elseif estimator == :kNN
+		model = KNeighborsClassifier(n_neighbors = modelHyperParameters["k"])
+	else
+		error("Unsupported model type: $estimator")
+	end
+	return model
+end;
+
+function trainClassEnsemble(estimators::AbstractArray{Symbol, 1},
+	modelsHyperParameters::AbstractArray{Dict{String, Any}, 1},
+	trainingDataset::Tuple{AbstractArray{<:Real, 2}, AbstractArray{Bool, 2}},
+	kFoldIndices::Array{Int64, 1})
+
+	# Assertions for defensive programming
+	@assert length(estimators) == length(modelsHyperParameters) "Each estimator should have corresponding hyperparameters."
+	@assert size(trainingDataset[1], 1) == size(trainingDataset[2], 1) "Number of input samples must match number of target labels."
+	@assert length(kFoldIndices) == size(trainingDataset[1], 1) "Length of kFoldIndices should match the number of input samples."
+	@assert all(estimator in [:ANN, :SVM, :DecisionTree, :kNN] for estimator in estimators) "Unsupported model type in estimators array."
+
+	# Split dataset
+	(inputs, targets) = trainingDataset
+
+	# 1. Create a vector with k elements, which will contain the test results of the cross-validation process with the selected metric.
+	k = maximum(kFoldIndices)
+	testResults = Array{Dict}(undef, k)
+	classifiers = Array{Any}(undef, k)
+
+	numModels = length(estimators)
+	# Initialice models like an array to store each model
+	models = Array{Any}(undef, numModels)
+	modelLabels = Dict(
+		:ANN => "ANN",
+		:SVM => "SVM",
+		:DecisionTree => "DT",
+		:kNN => "KNN",
+	)
+
+
+	# 2. Make a loop with k iterations (k folds) where within each iteration from the matrices of desired inputs and outputs, by means of the vector of indices resulting from the previous function, 4 matrices are created: desired inputs and outputs for training and test.
+	for i in 1:k
+		# Select training and validation data based on fold indices
+		train_inputs = inputs[kFoldIndices.!=i, :]
+		test_inputs = inputs[kFoldIndices.==i, :]
+		train_targets = targets[kFoldIndices.!=i, :]
+		test_targets = targets[kFoldIndices.==i, :]
+
+		train_targets = reshape(train_targets, :)
+
+		# 3. Within this another loop, add a call to generate the models, which can be any of ANN, SVM, DecisionTree or kNN.
+		for (index, estimator) in enumerate(estimators)
+			# Generate the model with the selected estimator and hyperparameters
+			model = generateModel(estimator, modelsHyperParameters[index])
+			# 4. Train those models by using the corresponding training set, i. e., the remaining K subsets non used for testing.
+			fit!(model, train_inputs, train_targets)
+			# Store each model in the array
+
+			models[index] = (estimator, deepcopy(model))
+		end
+		# 6. Build the ensemble following one of the strategies described above (any of them) and calculate the test.
+		stacking_classifier = StackingClassifier(
+			estimators = [("m$(idx)_" * modelLabels[name], model) for (idx, (name, model)) in enumerate(models)],
+			final_estimator = SVC(probability = true), n_jobs = -1)
+		fit!(stacking_classifier, train_inputs, train_targets)
+		# Deep copy
+		classifiers[i] = deepcopy(stacking_classifier)
+		outputs = stacking_classifier.predict(test_inputs)
+		metrics = confusionMatrix(outputs, vec(test_targets))
+		testResults[i] = metrics
+	end
+	# 7. Finally, provide the result of averaging the values of these vectors for each metric together with their standard deviations.
+	accuracy = [tr["accuracy"] for tr in testResults]
+	error_rate = [tr["error_rate"] for tr in testResults]
+	sensitivity = [tr["sensitivity"] for tr in testResults]
+	specificity = [tr["specificity"] for tr in testResults]
+	positive_predictive_value = [tr["positive_predictive_value"] for tr in testResults]
+	negative_predictive_value = [tr["negative_predictive_value"] for tr in testResults]
+	f_score = [tr["f_score"] for tr in testResults]
+
+	return Dict(
+		"accuracy" => (mean(accuracy), std(accuracy)),
+		"error_rate" => (mean(error_rate), std(error_rate)),
+		"sensitivity" => (mean(sensitivity), std(sensitivity)),
+		"specificity" => (mean(specificity), std(specificity)),
+		"positive_predictive_value" => (mean(positive_predictive_value), std(positive_predictive_value)),
+		"negative_predictive_value" => (mean(negative_predictive_value), std(negative_predictive_value)),
+		"f_score" => (mean(f_score), std(f_score)),
+		# "confusion_matrix" => (mean(testResults[:]["confusion_matrix"]), std(testResults[:]["confusion_matrix"])),
+	)
+end;
+
+function trainClassEnsemble(baseEstimator::Symbol,
+	modelsHyperParameters::Dict{String, Any},
+	trainingDataset::Tuple{AbstractArray{<:Real, 2}, AbstractArray{Bool, 2}},
+	kFoldIndices::Array{Int64, 1},
+	NumEstimators::Int = 100)
+
+	# Create an array of NumEstimators symbols of tyoe baseEstimator, the symbols could be :ANN, :SVM, :kNN or :DecisionTree
+	estimators = [baseEstimator for i in 1:NumEstimators]
+	modHyperParameters = [modelsHyperParameters for i in 1:NumEstimators]
+	trainClassEnsemble(estimators,
+		modHyperParameters,
+		trainingDataset,
+		kFoldIndices)
+end
+
+function modelCrossValidation(modelType::Symbol,
+	modelHyperparameters::Dict,
+	inputs::AbstractArray{<:Real, 2},
+	targets::AbstractArray{<:Any, 1},
+	crossValidationIndices::Array{Int64, 1})
+
+	# Number of folds for cross-validation
+	numFolds = maximum(crossValidationIndices)
+
+	# Initialize an array to store metrics for each fold
+	metrics = Vector{Dict{String, Any}}()
+
+	# Perform cross-validation
+	for fold in 1:numFolds
+		# Select training and validation data based on fold indices
+		train_inputs = inputs[crossValidationIndices.!=fold, :]
+		val_inputs = inputs[crossValidationIndices.==fold, :]
+		train_targets = targets[crossValidationIndices.!=fold]
+		val_targets = targets[crossValidationIndices.==fold]
+
+		# Model training and prediction
+		predictions = []  # Placeholder for storing predictions
+		if modelType == :ANN
+			one_hot_targets = collect(oneHotEncoding(train_targets))
+			val_targets = collect(oneHotEncoding(val_targets))
+
+			# Define the transfer function for each layer in the topology
+			topology = modelHyperparameters["topology"]
+			transferFunctions = fill(tanh, length(topology))
+
+			# Train ANN and obtain metrics
+			train_result = trainClassANN(topology,
+				(train_inputs, one_hot_targets);
+				transferFunctions = transferFunctions, maxEpochs = modelHyperparameters["maxEpochs"], 
+				minLoss = modelHyperparameters["minLoss"],
+				learningRate = modelHyperparameters["learningRate"],
+				maxEpochsVal = modelHyperparameters["maxEpochsVal"],
+			)
+
+			# Extract the model and make predictions on validation data
+			(model,_,_,_) = train_result
+			predictions = model(val_inputs')'
+			predictions = [ (i == argmax(prediction) ? 1 : 0) for (i, prediction) in enumerate(predictions) ]
+		elseif modelType == :SVM
+			model = SVC(kernel = modelHyperparameters["kernel"], C = modelHyperparameters["C"])
+			fit!(model, train_inputs, train_targets)
+			predictions = predict(model, val_inputs)
+
+		elseif modelType == :DecisionTree
+			model = DecisionTreeClassifier(max_depth = modelHyperparameters["max_depth"],
+				random_state = modelHyperparameters["random_state"])
+			fit!(model, train_inputs, train_targets)
+			predictions = predict(model, val_inputs)
+
+		elseif modelType == :kNN
+			model = KNeighborsClassifier(n_neighbors = modelHyperparameters["k"])
+			fit!(model, train_inputs, train_targets)
+			predictions = predict(model, val_inputs)
+
+		else
+			error("Unsupported model type: $modelType")
+		end
+
+		# Calculate metrics using the confusion matrix for each fold
+		metrics_fold = confusionMatrix(predictions, val_targets)
+
+		# Append the fold metrics dictionary to the array
+		push!(metrics, metrics_fold)
+	end
+
+	return metrics
+end

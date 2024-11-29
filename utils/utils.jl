@@ -102,6 +102,29 @@ function normalizeZeroMean(dataset::AbstractArray{<:Real, 2})
 	normalizeZeroMean!(copy(dataset), calculateZeroMeanNormalizationParameters(dataset))
 end;
 
+function normalizeData(train_inputs::AbstractArray{<:Real, 2},
+    test_inputs::AbstractArray{<:Real, 2},
+    normalizationType::Symbol)
+
+    @assert normalizationType in [:ZeroMean, :MinMax]
+    
+    if normalizationType == :MinMax
+        parameters = calculateMinMaxNormalizationParameters(train_inputs)
+        # normalize the train using the previous parameters
+        new_train_inputs = normalizeMinMax(train_inputs, parameters)
+        # normalize the test using the  train parameters
+        new_test_inputs = normalizeMinMax(test_inputs, parameters)
+    elseif normalizationType == :ZeroMean
+        parameters = calculateZeroMeanNormalizationParameters(train_inputs)
+        # normalize the train using the previous parameters
+        new_train_inputs = normalizeZeroMean(train_inputs, parameters)
+        # normalize the test using the  train parameters
+        new_test_inputs = normalizeZeroMean(test_inputs, parameters)
+    end
+
+    return (new_train_inputs, new_test_inputs)
+end;
+
 function crossvalidation(N::Int64, k::Int64)
 	sorted_vector = collect(1:k)
     repeated_vector = repeat(sorted_vector, Int(ceil(N / k)))
