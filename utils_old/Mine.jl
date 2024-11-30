@@ -10,6 +10,7 @@ using Random:seed!
 using Statistics
 using Flux
 using ScikitLearn
+using CSV, DataFrames
 
 @sk_import svm: SVC
 @sk_import tree: DecisionTreeClassifier
