@@ -8,6 +8,7 @@ using Flux
 using ScikitLearn
 using CSV, DataFrames
 using Printf
+using Plots
 
 @sk_import svm:SVC
 @sk_import tree:DecisionTreeClassifier
@@ -565,3 +566,36 @@ function averageAccuracies(data::Vector{Vector{Tuple{Int, Any, Float64}}})
     return results
 end
 
+function draw_results(x, y; colors, target_names=nothing)
+    # Get the number of classes from the one-hot encoded matrix
+    num_classes = size(y, 2)
+
+    # Check that the number of colors matches the number of classes
+    @assert length(colors) == num_classes "Number of colors must match the number of classes"
+
+    # If target_names are provided, ensure they match the number of classes
+    if !isnothing(target_names)
+        @assert length(target_names) == num_classes "Number of target names must match the number of classes"
+        labels = target_names
+    else
+        labels = [string("Class ", i) for i in 1:num_classes]
+    end
+
+    # Initialize the plot
+    fig = plot()
+
+    # Plot each class separately
+    for i in 1:num_classes
+        # Logical indexing to get points of class `i`
+        class_indices = y[:, i] .== 1
+        scatter!(x[class_indices, 1], x[class_indices, 2], markercolor=colors[i], label=labels[i])
+    end
+
+    return fig
+end
+
+function document(text::String)
+    println("/" * repeat("-",80) * "/")
+    println("/ " * text * repeat(" ",80-length(text)-1) * "/")
+    println("/" * repeat("-",80) * "/")
+end
