@@ -96,6 +96,16 @@ data = CSV.read("datasets/air_quality_health_impact_data.csv", DataFrame)
 # Check the general distribution of data in the dataset
 println(describe(data))
 
+# We check the distribution of the different parameters in search of outliers in order to decide the better normalization method.
+histos = []
+for col in propertynames(data[:,2:13])
+    push!(histos, histogram(data[:,col], title=col, legend=false))
+end
+for (i,h) in enumerate(histos)
+    plot(h)
+    savefig("images/histogram_"*names(data)[i+1])
+end
+
 # We check how many classes have of each kind
 counts = combine(groupby(data, :HealthImpactClass), nrow => :Count)
 comment("Elements per class:")
