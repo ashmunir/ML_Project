@@ -1,6 +1,6 @@
 module ML1Utils
 
-using Pkg: Pkg;
+using Pkg: Pkg
 Pkg.add("Flux")
 
 using Random
@@ -34,14 +34,16 @@ export trainClassEnsemble
 export oneHotEncoding
 export drawResults
 
+# Prints a formatted comment block with the given text
 function comment(text::String)
-    width = 100
-    println()
-    println("/" * repeat("-",width) * "/")
-    println("/ " * text * repeat(" ",width-length(text)-1) * "/")
-    println("/" * repeat("-",width) * "/")
+	width = 100
+	println()
+	println("/" * repeat("-", width) * "/")
+	println("/ " * text * repeat(" ", width - length(text) - 1) * "/")
+	println("/" * repeat("-", width) * "/")
 end
 
+# Performs stratified holdout split of data based on class labels
 function holdOutStratified(classes::Vector{Int}, P::Real)
 	# Verificar que P está entre 0 y 1
 	@assert ((P >= 0.0) & (P <= 1.0))
@@ -71,9 +73,10 @@ function holdOutStratified(classes::Vector{Int}, P::Real)
 	return (train_idx, test_idx)
 end
 
+# Normalizes training and test data using specified normalization type
 function normalizeData(train_inputs::AbstractArray{<:Real, 2},
-                        test_inputs::AbstractArray{<:Real, 2},
-                        normalizationType::Symbol)
+	test_inputs::AbstractArray{<:Real, 2},
+	normalizationType::Symbol)
 
 	@assert normalizationType in [:ZeroMean, :MinMax]
 
@@ -94,6 +97,7 @@ function normalizeData(train_inputs::AbstractArray{<:Real, 2},
 	return (new_train_inputs, new_test_inputs)
 end
 
+# Generates a machine learning model based on provided hyperparameters
 function genModel(modelsHyperParameters::Dict{String})
 	estimator = modelsHyperParameters["estimator"]
 	if estimator == :SVM
@@ -116,6 +120,7 @@ function genModel(modelsHyperParameters::Dict{String})
 	end
 end
 
+# Finds the positions of the best models for each estimator type
 function bestModelPositions(models_data::Vector{<:Any})
 
 	best_models = Dict{Symbol, Tuple{Int, Float64}}()
@@ -133,6 +138,7 @@ function bestModelPositions(models_data::Vector{<:Any})
 	return [v[1] for (k, v) in best_models]
 end
 
+# Calculates confusion matrix and related metrics for binary classification
 function confusionMatrix(outputs::AbstractArray{Bool, 1}, targets::AbstractArray{Bool, 1})
 	@assert length(outputs) == length(targets) "Outputs and targets must have the same length"
 
@@ -186,6 +192,7 @@ function confusionMatrix(outputs::AbstractArray{Bool, 1}, targets::AbstractArray
 
 end
 
+# Prints a formatted confusion matrix with optional class labels
 function printConfusionMatrix(confusion_matrix::AbstractMatrix{Int}, class_labels::Vector{String} = nothing)
 	num_classes = size(confusion_matrix, 1)
 
@@ -211,6 +218,7 @@ function printConfusionMatrix(confusion_matrix::AbstractMatrix{Int}, class_label
 	end
 end
 
+# Generates cross-validation indices for a given number of samples and folds
 function crossvalidation(N::Int64, k::Int64)
 	sorted_vector = collect(1:k)
 	repeated_vector = repeat(sorted_vector, Int(ceil(N / k)))
@@ -218,6 +226,7 @@ function crossvalidation(N::Int64, k::Int64)
 	return shuffle!(repeated_vector)
 end
 
+# Performs stratified cross-validation for multi-class targets
 function crossvalidation(targets::AbstractArray{Bool, 2}, k::Int64)
 	@assert size(targets, 2) < 2 "Targets must be a 2D array with more than one column."
 	N = size(targets, 1)
@@ -236,7 +245,7 @@ function crossvalidation(targets::AbstractArray{Bool, 2}, k::Int64)
 	return indexes
 end
 
-
+# Trains an ensemble of classifiers using k-fold cross-validation
 function trainClassEnsemble(modelsHyperParameters::AbstractArray{Dict{String, Any}, 1},
 	trainingDataset::Tuple{AbstractArray{<:Real}, AbstractVector{<:Any}},
 	kFoldIndices::Array{Int64, 1})
@@ -328,12 +337,13 @@ function trainClassEnsemble(modelsHyperParameters::AbstractArray{Dict{String, An
 		"positive_predictive_value" => (mean(positive_predictive_value), std(positive_predictive_value)),
 		"negative_predictive_value" => (mean(negative_predictive_value), std(negative_predictive_value)),
 		"f_score" => (mean(f_score), std(f_score)),
-		"models_accuracies" => mean_accuracies
+		"models_accuracies" => mean_accuracies,
 	)
 
 	return mean_metrics
 end
 
+# Converts a feature vector to one-hot encoding based on given classes
 function oneHotEncoding(feature::AbstractArray{<:Any, 1}, classes::AbstractArray{<:Any, 1})
 	# First we are going to set a line as defensive to check values
 	@assert(all([in(value, classes) for value in feature]))
@@ -355,75 +365,53 @@ function oneHotEncoding(feature::AbstractArray{<:Any, 1}, classes::AbstractArray
 	return oneHot
 end
 
-# Function to transorm in one-hot-encoding based on the values of the array passed
+# Converts a feature vector to one-hot encoding using unique values as classes
 oneHotEncoding(feature::AbstractArray{<:Any, 1}) = oneHotEncoding(feature, unique(feature))
 
-# Function to transform a feature into one-hot encoding in base of the classes passed by parameter
-function oneHotEncoding(feature::AbstractArray{<:Any, 1}, classes::AbstractArray{<:Any, 1})
-	# First we are going to set a line as defensive to check values
-	@assert(all([in(value, classes) for value in feature]))
+# Converts a boolean feature vector to a 2D array
+oneHotEncoding(feature::AbstractArray{Bool, 1}) = reshape(feature, :, 1)
 
-	# Second defensive statement, check the number of classes
-	numClasses = length(classes)
-	@assert(numClasses > 1)
+# Visualizes classification results in a 2D scatter plot
+function drawResults(x, y; colors, target_names = nothing, filename = "image.png")
+	# Get the number of classes from the one-hot encoded matrix
+	num_classes = size(y, 2)
 
-	if (numClasses == 2)
-		# Case with only two classes
-		oneHot = reshape(feature .== classes[1], :, 1)
+	# Check that the number of colors matches the number of classes
+	@assert length(colors) == num_classes "Number of colors must match the number of classes"
+
+	# If target_names are provided, ensure they match the number of classes
+	if !isnothing(target_names)
+		@assert length(target_names) == num_classes "Number of target names must match the number of classes"
+		labels = target_names
 	else
-		#Case with more than two clases
-		oneHot = BitArray{2}(undef, length(feature), numClasses)
-		for numClass ∈ 1:numClasses
-			oneHot[:, numClass] .= (feature .== classes[numClass])
-		end
+		labels = [string("Class ", i) for i in 1:num_classes]
 	end
-	return oneHot
+
+	# Initialize the plot
+	fig = plot(dpi = 1000)
+
+	# Plot each class separately
+	for i in 1:num_classes
+		# Logical indexing to get points of class `i`
+		class_indices = y[:, i] .== 1
+		scatter!(x[class_indices, 1], x[class_indices, 2], markercolor = colors[i], label = labels[i])
+	end
+	savefig(filename)
+
+	return fig
 end
 
-oneHotEncoding(feature::AbstractArray{<:Any, 1}) = oneHotEncoding(feature, unique(feature));
-
-oneHotEncoding(feature::AbstractArray{Bool, 1}) = reshape(feature, :, 1);
-
-function drawResults(x, y; colors, target_names=nothing, filename="image.png")
-    # Get the number of classes from the one-hot encoded matrix
-    num_classes = size(y, 2)
-
-    # Check that the number of colors matches the number of classes
-    @assert length(colors) == num_classes "Number of colors must match the number of classes"
-
-    # If target_names are provided, ensure they match the number of classes
-    if !isnothing(target_names)
-        @assert length(target_names) == num_classes "Number of target names must match the number of classes"
-        labels = target_names
-    else
-        labels = [string("Class ", i) for i in 1:num_classes]
-    end
-
-    # Initialize the plot
-    fig = plot(dpi=1000)
-
-    # Plot each class separately
-    for i in 1:num_classes
-        # Logical indexing to get points of class `i`
-        class_indices = y[:, i] .== 1
-        scatter!(x[class_indices, 1], x[class_indices, 2], markercolor=colors[i], label=labels[i])
-    end
-    savefig(filename)
-
-    return fig
-end
-
-
-
-# Obtain values MEAN and STANDARD DESVIATION of an array to use in normalization:
+# Calculates mean and standard deviation for zero-mean normalization
 function calculateZeroMeanNormalizationParameters(dataset::AbstractArray{<:Real, 2})
 	return mean(dataset, dims = 1), std(dataset, dims = 1)
 end
 
+# Calculates minimum and maximum values for min-max normalization
 function calculateMinMaxNormalizationParameters(dataset::AbstractArray{<:Real, 2})
 	return minimum(dataset, dims = 1), maximum(dataset, dims = 1)
 end
 
+# Applies min-max normalization in-place using provided parameters
 function normalizeMinMax!(dataset::AbstractArray{<:Real, 2},
 	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
 	minValues = normalizationParameters[1]
@@ -435,19 +423,23 @@ function normalizeMinMax!(dataset::AbstractArray{<:Real, 2},
 	return dataset
 end
 
+# Applies min-max normalization in-place using calculated parameters
 function normalizeMinMax!(dataset::AbstractArray{<:Real, 2})
 	normalizeMinMax!(dataset, calculateMinMaxNormalizationParameters(dataset))
 end
 
+# Applies min-max normalization and returns a new array
 function normalizeMinMax(dataset::AbstractArray{<:Real, 2},
 	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
 	normalizeMinMax!(copy(dataset), normalizationParameters)
 end
 
+# Applies min-max normalization using calculated parameters and returns a new array
 function normalizeMinMax(dataset::AbstractArray{<:Real, 2})
 	normalizeMinMax!(copy(dataset), calculateMinMaxNormalizationParameters(dataset))
 end
 
+# Applies zero-mean normalization in-place using provided parameters
 function normalizeZeroMean!(dataset::AbstractArray{<:Real, 2},
 	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
 	avgValues = normalizationParameters[1]
@@ -459,23 +451,23 @@ function normalizeZeroMean!(dataset::AbstractArray{<:Real, 2},
 	return dataset
 end
 
+# Applies zero-mean normalization and returns a new array
 function normalizeZeroMean(dataset::AbstractArray{<:Real, 2},
 	normalizationParameters::NTuple{2, AbstractArray{<:Real, 2}})
 	normalizeZeroMean!(copy(dataset), normalizationParameters)
 end
 
+# Applies zero-mean normalization using calculated parameters and returns a new array
 function normalizeZeroMean(dataset::AbstractArray{<:Real, 2})
 	normalizeZeroMean!(copy(dataset), calculateZeroMeanNormalizationParameters(dataset))
 end
 
-
-
-# MULTICLASS CONFUSION MATRIX
-# Accuracy functions
+# Calculates accuracy for binary classification
 function accuracy(outputs::AbstractArray{Bool, 1}, targets::AbstractArray{Bool, 1})
 	return mean(outputs .== targets)
 end
 
+# Calculates accuracy for multi-class classification
 function accuracy(outputs::AbstractArray{Bool, 2}, targets::AbstractArray{Bool, 2})
 	@assert(all(size(outputs) .== size(targets)))
 	# The number of columns will never be 2, because an output variable with 2 classes will be encoded as a 1-column matrix
@@ -485,13 +477,15 @@ function accuracy(outputs::AbstractArray{Bool, 2}, targets::AbstractArray{Bool, 
 	else
 		return mean(all(targets .== outputs, dims = 2))
 	end
-end;
+end
 
+# Calculates accuracy for binary classification with threshold
 function accuracy(outputs::AbstractArray{<:Real, 1}, targets::AbstractArray{Bool, 1};
 	threshold::Real = 0.5)
 	accuracy(outputs .>= threshold, targets)
 end
 
+# Calculates accuracy for multi-class classification with threshold
 function accuracy(outputs::AbstractArray{<:Real, 2}, targets::AbstractArray{Bool, 2};
 	threshold::Real = 0.5)
 	@assert(all(size(outputs) .== size(targets)))
@@ -502,6 +496,7 @@ function accuracy(outputs::AbstractArray{<:Real, 2}, targets::AbstractArray{Bool
 	end
 end
 
+# Calculates confusion matrix and related metrics for multi-class classification
 function confusionMatrix(outputs::AbstractArray{Bool, 2}, targets::AbstractArray{Bool, 2}; weighted::Bool = true)
 	# Ensure outputs and targets have the same number of columns
 	@assert size(outputs, 2) == size(targets, 2)
@@ -583,6 +578,7 @@ function confusionMatrix(outputs::AbstractArray{Bool, 2}, targets::AbstractArray
 	)
 end
 
+# Calculates confusion matrix for non-binary outputs and targets
 function confusionMatrix(outputs::AbstractArray{<:Any}, targets::AbstractArray{<:Any}; weighted::Bool = true)
 	# Ensure that outputs and targets are of the same length
 	@assert length(outputs) == length(targets) "Outputs and targets must be of the same length."
@@ -598,31 +594,32 @@ function confusionMatrix(outputs::AbstractArray{<:Any}, targets::AbstractArray{<
 	return confusionMatrix(one_hot_outputs, one_hot_targets; weighted = weighted)
 end
 
+# Calculates average accuracies for each model across multiple folds
 function averageAccuracies(data::Vector{Vector{Tuple{Int, Any, Float64}}})
-    # Verificar que todas las filas tienen el mismo número de columnas
-    n_columns = length(data[1])
-    @assert all(length(row) == n_columns for row in data) "Todas las filas deben tener el mismo número de columnas"
+	# Verificar que todas las filas tienen el mismo número de columnas
+	n_columns = length(data[1])
+	@assert all(length(row) == n_columns for row in data) "Todas las filas deben tener el mismo número de columnas"
 
-    # Inicializar un vector para los resultados
-    results = Vector{Tuple{Int, Any, Float64}}()
+	# Inicializar un vector para los resultados
+	results = Vector{Tuple{Int, Any, Float64}}()
 
-    # Iterar por las columnas
-    for col in 1:n_columns
-        # Extraer el segundo atributo (estimator) y los valores de accuracy
-        estimators = [row[col][2] for row in data]
-        accuracies = [row[col][3] for row in data]
+	# Iterar por las columnas
+	for col in 1:n_columns
+		# Extraer el segundo atributo (estimator) y los valores de accuracy
+		estimators = [row[col][2] for row in data]
+		accuracies = [row[col][3] for row in data]
 
-        # Asegurar que todos los estimators son iguales dentro de la columna
-        @assert all(est == estimators[1] for est in estimators) "Los valores del segundo atributo deben ser consistentes en una columna"
+		# Asegurar que todos los estimators son iguales dentro de la columna
+		@assert all(est == estimators[1] for est in estimators) "Los valores del segundo atributo deben ser consistentes en una columna"
 
-        # Calcular el promedio
-        avg_accuracy = mean(accuracies)
+		# Calcular el promedio
+		avg_accuracy = mean(accuracies)
 
-        # Pushear el índice, el segundo atributo y el promedio
-        push!(results, (col, estimators[1], avg_accuracy))
-    end
+		# Pushear el índice, el segundo atributo y el promedio
+		push!(results, (col, estimators[1], avg_accuracy))
+	end
 
-    return results
+	return results
 end
 
 
